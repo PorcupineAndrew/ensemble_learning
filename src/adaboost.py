@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 # **********************************************************************
 # * Description   : Ada boost M1
-# * Last change   : 23:04:28 2020-05-16
+# * Last change   : 16:07:27 2020-05-17
 # * Author        : Yihao Chen
 # * Email         : chenyiha17@mails.tsinghua.edu.cn
 # * License       : www.opensource.org/licenses/bsd-license.php
@@ -25,8 +25,8 @@ def train_models(n_iter, df, clf_type):
         mis = pred_func(m, vec) != label
         err = weight[mis].sum()
         print(f"iter {_} err {err}")
-        # if err > 0.5:
-        #     break
+        if err > 0.5:
+            break
         beta = err / (1-err)
         betas.append(beta)
         weight[~mis] *= beta

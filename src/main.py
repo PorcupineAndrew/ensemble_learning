@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 # **********************************************************************
 # * Description   : main process
-# * Last change   : 15:24:57 2020-05-17
+# * Last change   : 17:31:56 2020-05-17
 # * Author        : Yihao Chen
 # * Email         : chenyiha17@mails.tsinghua.edu.cn
 # * License       : www.opensource.org/licenses/bsd-license.php
@@ -30,6 +30,7 @@ def main(word_dims, clf_type, n_workers, framework, **kwargs):
     df_train = data_load(
         DATA_PATH / "train.csv",
         word_dims, sep="\t", engine="c",
+        w2v_model_path=DATA_PATH / "word2vec.model",
         save_path=DATA_PATH / "train_vec.csv")
 
     if framework == "adaboost":
@@ -47,6 +48,7 @@ def main(word_dims, clf_type, n_workers, framework, **kwargs):
     df_test = data_load(
         DATA_PATH / "test.csv",
         word_dims, sep="\t", engine="c",
+        w2v_model_path=DATA_PATH / "word2vec.model",
         save_path=DATA_PATH / "test_vec.csv")
 
     p = pred(df_test, n_workers)
