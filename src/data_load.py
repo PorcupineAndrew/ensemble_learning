@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 # **********************************************************************
 # * Description   : load data and process
-# * Last change   : 17:44:15 2020-05-17
+# * Last change   : 21:12:27 2020-05-17
 # * Author        : Yihao Chen
 # * Email         : chenyiha17@mails.tsinghua.edu.cn
 # * License       : www.opensource.org/licenses/bsd-license.php
@@ -19,7 +19,7 @@ def word2vec_model(words, size):
         "hs": 1,
         "min_count": 1,
         "window": 5,
-        "workers": 20,
+        "workers": 6,
         "size": size,
     }
     return word2vec.Word2Vec(words, **config)
