@@ -1,160 +1,82 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+#-*- coding: utf-8 -*-
 
-import tensorflow as tf
-import numpy as np
 import os
-import time
-import random
-from model import Model
-import sys
+import pandas as pd
+import numpy as np
+import click
+from text_processing_util import TextProcessing
+from text_cnn import kimCNN
+from pathlib import Path
+from keras.callbacks import ModelCheckpoint
+from keras.models import load_model
 
-sys.path.append("../")
-from data_load import data_load
+MAX_SEQUENCE_LENGTH = 50
+MAX_NB_WORDS = 10000
+EMBEDDING_DIM = 300
+VALIDATION_SPLIT = 0.2
 
-SCRIPT_PATH = Path(os.path.dirname(os.path.abspath(__file__))).parent
+SCRIPT_PATH = Path(os.path.abspath(__file__)).parent.parent
 DATA_PATH = SCRIPT_PATH.parent / "data"
-TRAIN_DIR = SCRIPT_PATH.parent / "train"
-if not os.path.exists(TRAIN_DIR):
-    os.mkdir(TRAIN_DIR)
+TRAIN_PATH = SCRIPT_PATH.parent / "train"
 
-tf.app.flags.DEFINE_integer("batch_size", 100, "batch size for training")
-tf.app.flags.DEFINE_integer("num_epochs", 500, "number of epochs")
-tf.app.flags.DEFINE_float("drop_rate", 0.5, "drop out rate")
-tf.app.flags.DEFINE_boolean("is_train", True, "False to inference")
-tf.app.flags.DEFINE_integer("inference_version", 0, "the version for inference")
-FLAGS = tf.app.flags.FLAGS
+@click.command()
+@click.option("--prefix", "-p", default="", help="prefix for experiment")
+@click.option("--is-pred", is_flag=True, help="train or inference")
+@click.option("--model-name", "-l", default=None, help="model name to load")
+@click.option("--weight", "-w", default=None, help="weight to load")
+@click.option("--output-path", "-o", default="pred.csv", help="path to predict output")
+def main(prefix, model_name, weight, output_path, **kwargs):
+    if not kwargs.pop("is_pred", False):
+        df = pd.read_csv(DATA_PATH / "train.csv", sep="\t", engine="c")
+        labels = df.overall.values.astype(int)
+        # texts = df.summary.values.astype(str)
+        texts = df.reviewText.values.astype(str)
+        del df
 
-def load_train_data():
-    df_train = data_load(
-        DATA_PATH / "train.csv",
-        word_dims, sep="\t", engine="c",
-        w2v_model_path=DATA_PATH / "word2vec.model",
-        save_path=DATA_PATH / "train_vec.csv")
-    train_data = df_train.drop("label", axis="columns").values
-    train_label = df_train.label.values
-    del df_train
-    
-    shuffle_idx = np.arange(df_train.shape[0])
-    random.shuffle(shuffle_idx)
-    train_data = train_data[shuffle_idx]
-    train_label = train_label[shuffle_idx]
+        tp = TextProcessing(texts, labels, EMBEDDING_DIM, MAX_SEQUENCE_LENGTH, MAX_NB_WORDS, VALIDATION_SPLIT)
 
-    return train_data, train_label
+        x_train, y_train, x_val, y_val, word_index = tp.preprocess()
+        with open(TRAIN_PATH / f"{prefix}tokenizer.json", "w") as f:
+            f.write(tp.tokenizer_string)
+        embeddings_index = tp.build_embedding_index_from_word2vec(DATA_PATH / "word2vec.model")
 
+        labels_index = tp.labels_index
+        del tp
 
-def shuffle(X, y, shuffle_parts):
-    chunk_size = int(len(X) / shuffle_parts)
-    shuffled_range = list(range(chunk_size))
-
-    X_buffer = np.copy(X[0:chunk_size])
-    y_buffer = np.copy(y[0:chunk_size])
-
-    for k in range(shuffle_parts):
-        np.random.shuffle(shuffled_range)
-        for i in range(chunk_size):
-            X_buffer[i] = X[k * chunk_size + shuffled_range[i]]
-            y_buffer[i] = y[k * chunk_size + shuffled_range[i]]
-
-        X[k * chunk_size:(k + 1) * chunk_size] = X_buffer
-        y[k * chunk_size:(k + 1) * chunk_size] = y_buffer
-
-    return X, y
-
-
-def train_epoch(model, sess, X, y): # Training Process
-    loss, acc = 0.0, 0.0
-    st, ed, times = 0, FLAGS.batch_size, 0
-    while st < len(X) and ed <= len(X):
-        X_batch, y_batch = X[st:ed], y[st:ed]
-        feed = {model.x_: X_batch, model.y_: y_batch}
-        loss_, acc_, _= sess.run([model.loss, model.acc, model.train_op], feed)
-        loss += loss_
-        acc += acc_
-        st, ed = ed, ed+FLAGS.batch_size
-        times += 1
-    loss /= times
-    acc /= times
-    return acc, loss
-
-
-def valid_epoch(model, sess, X, y): # Valid Process
-    loss, acc = 0.0, 0.0
-    st, ed, times = 0, FLAGS.batch_size, 0
-    while st < len(X) and ed <= len(X):
-        X_batch, y_batch = X[st:ed], y[st:ed]
-        feed = {model.x_: X_batch, model.y_: y_batch}
-        loss_, acc_ = sess.run([model.loss_val, model.acc_val], feed)
-        loss += loss_
-        acc += acc_
-        st, ed = ed, ed+FLAGS.batch_size
-        times += 1
-    loss /= times
-    acc /= times
-    return acc, loss
-
-
-def inference(model, sess, X): # Test Process
-    return sess.run([model.pred_val], {model.x_: X})[0]
-
-
-
-with tf.Session() as sess:
-    if FLAGS.is_train:
-        X_train, y_train = load_train_data()
-        split_idx = int(X_train.shape[0] * 0.9)
-        X_val, y_val = X_train[split_idx:], y_train[split_idx:]
-        X_train, y_train = X_train[:split_idx], y_train[:split_idx]
-        cnn_model = Model(drop_rate=FLAGS.drop_rate)
-        if tf.train.get_checkpoint_state(TRAIN_DIR):
-            cnn_model.saver.restore(sess, tf.train.latest_checkpoint(TRAIN_DIR))
+        if model_name is None:
+            model = kimCNN(EMBEDDING_DIM, MAX_SEQUENCE_LENGTH, MAX_NB_WORDS, embeddings_index, word_index, labels_index=labels_index)
         else:
-            tf.global_variables_initializer().run()
+            model = load_model(str(TRAIN_PATH / model_name))
+        print(model.summary())
 
-        pre_losses = [1e18] * 3
-        best_val_acc = 0.0
-        for epoch in range(FLAGS.num_epochs):
-            start_time = time.time()
-            train_acc, train_loss = train_epoch(cnn_model, sess, X_train, y_train)
-            X_train, y_train = shuffle(X_train, y_train, 1)
+        # checkpoint 
+        filepath = str(TRAIN_PATH / f"{prefix}weights.best.hdf5")
+        checkpoint = ModelCheckpoint(filepath, monitor='val_acc', verbose=1, save_best_only=True, mode='max')
 
-            val_acc, val_loss = valid_epoch(cnn_model, sess, X_val, y_val)
-
-            if val_acc >= best_val_acc:
-                best_val_acc = val_acc
-                best_epoch = epoch + 1
-                test_acc, test_loss = valid_epoch(cnn_model, sess, X_test, y_test)
-                cnn_model.saver.save(sess, '%s/checkpoint' % TRAIN_DIR, global_step=cnn_model.global_step)
-
-            epoch_time = time.time() - start_time
-            print("Epoch " + str(epoch + 1) + " of " + str(FLAGS.num_epochs) + " took " + str(epoch_time) + "s")
-            print("  learning rate:                 " + str(cnn_model.learning_rate.eval()))
-            print("  training loss:                 " + str(train_loss))
-            print("  training accuracy:             " + str(train_acc))
-            print("  validation loss:               " + str(val_loss))
-            print("  validation accuracy:           " + str(val_acc))
-            print("  best epoch:                    " + str(best_epoch))
-            print("  best validation accuracy:      " + str(best_val_acc))
-            print("  test loss:                     " + str(test_loss))
-            print("  test accuracy:                 " + str(test_acc))
-
-            if train_loss > max(pre_losses):
-                sess.run(cnn_model.learning_rate_decay_op)
-            pre_losses = pre_losses[1:] + [train_loss]
-
+        model.fit(x=x_train, y=y_train, batch_size=50, epochs=100, validation_data=(x_val, y_val), callbacks=[checkpoint])
+        model.save(str(TRAIN_PATH / f"{prefix}model.h5"))
     else:
-        cnn_model = Model()
-        if FLAGS.inference_version == 0:
-            model_path = tf.train.latest_checkpoint(TRAIN_DIR)
-        else:
-            model_path = '%s/checkpoint-%08d' % (TRAIN_DIR, FLAGS.inference_version)
-        cnn_model.saver.restore(sess, model_path)
-        X_test, y_test = load_test_data()
+        model = load_model(str(TRAIN_PATH / model_name))
+        print(model.summary())
+        
+        if weight is not None:
+            model.load_weights(str(TRAIN_PATH / weight))
 
-        count = 0
-        for i in range(len(X_test)):
-            test_one = X_test[i].reshape((1, X_test.shape[1], X_test.shape[2]))
-            result = inference(cnn_model, sess, test_one)[0]
-            if result == y_test[i]:
-                count += 1
-        print("test accuracy: {}".format(float(count) / len(X_test)))
+        df = pd.read_csv(DATA_PATH / "test.csv", sep="\t", engine="c")
+        # texts = df.summary.values.astype(str)
+        texts = df.reviewText.values.astype(str)
+        labels = np.zeros(len(texts))
+        del df
+
+        with open(TRAIN_PATH / f"{prefix}tokenizer.json", "r") as f:
+            tokenizer_string = f.read()
+        tp = TextProcessing(texts, labels, EMBEDDING_DIM, MAX_SEQUENCE_LENGTH, MAX_NB_WORDS)
+        x_test, _, _, _, word_index = tp.preprocess(tokenizer_string)
+
+        pred = np.argmax(model.predict(x_test), 1) + 1
+        pd.DataFrame.from_dict({"id": np.arange(len(pred))+1, "predicted": pred}) \
+            .to_csv(output_path, index=False)
+
+if __name__ == "__main__":
+    main()

@@ -2,7 +2,7 @@
 #-*- coding:utf-8 -*-
 # **********************************************************************
 # * Description   : classifier
-# * Last change   : 16:23:46 2020-05-17
+# * Last change   : 22:28:21 2020-05-17
 # * Author        : Yihao Chen
 # * Email         : chenyiha17@mails.tsinghua.edu.cn
 # * License       : www.opensource.org/licenses/bsd-license.php
@@ -54,7 +54,7 @@ def DT_train(train_data, train_labels, **kwargs):
     --------
     clf: DT classifer
     '''
-    clf = tree.DecisionTreeClassifier(max_depth=5)
+    clf = tree.DecisionTreeClassifier(max_depth=20)
     clf = clf.fit(train_data, train_labels, **kwargs)
     return clf
 
